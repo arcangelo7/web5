@@ -1,0 +1,205 @@
+<head>
+  <style> body {margin: 0 } </style>
+
+  <script src="//unpkg.com/three"></script>
+  <script src="//unpkg.com/three-spritetext"></script>
+  <script src="//unpkg.com/3d-force-graph"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <!--<script src="../../dist/3d-force-graph.js"></script>-->
+</head>
+
+<body>
+  <div id="3d-graph"></div>
+
+  <script type="module">
+    import { UnrealBloomPass } from '//unpkg.com/three/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+    var gData = (function () {
+    var json = null;
+      $.ajax({
+          'async': false,
+          'global': false,
+          'url': 'data.json',
+          'dataType': "json",
+          'success': function (data) {
+              json = data;
+          }
+      });
+
+      // link parent/children
+      for (var i = 0; i < json.nodes.length; i++) {
+        json.nodes[i].childLinks = [];
+      }
+      return json;
+    })(); 
+
+    const elem = document.getElementById('3d-graph');
+
+    const nodesById = Object.fromEntries(gData.nodes.map(node => [node.id, node]));      
+    gData.links.forEach(link => {
+      nodesById[link.source].childLinks.push(link);
+      const a = nodesById[link.source];
+      const b = nodesById[link.target];
+      !a.neighbors && (a.neighbors = []);
+      !b.neighbors && (b.neighbors = []);
+      a.neighbors.push(b);
+      b.neighbors.push(a);
+
+      !a.links && (a.links = []);
+      !b.links && (b.links = []);
+      a.links.push(link);
+      b.links.push(link);
+    });
+
+    const highlightNodes = new Set();
+    const highlightLinks = new Set();
+    let hoverNode = null;
+
+    const rootId = "dbr:Campo_Marzio"
+
+    const getPrunedTree = () => {
+      const visibleNodes = [];
+      const visibleLinks = [];
+
+      (function traverseTree(node = nodesById[rootId]) {
+        visibleNodes.push(node);
+        if (node.collapsed) return;
+        visibleLinks.push(...node.childLinks);
+        node.childLinks
+          .map(link => ((typeof link.target) === 'object') ? link.target : nodesById[link.target]) // get child node
+          .forEach(traverseTree);
+      })(); 
+      return { nodes: visibleNodes, links: visibleLinks };
+    };
+
+    function collapseNodes() {
+        var tree = getPrunedTree()
+        for (var i = 0; i < tree.nodes.length; i++) {
+          if (tree.nodes[i].childLinks.length < 4) {
+            tree.nodes[i].collapsed = true;
+          }
+        }
+      return tree;
+    }
+
+    collapseNodes();
+
+    const Graph = ForceGraph3D()(elem)
+        .graphData(getPrunedTree())
+        .nodeLabel('cartiglio')
+        .nodeAutoColorBy('group')
+        .linkWidth(link => highlightLinks.has(link) ? 4 : 1)
+        .linkDirectionalParticles(link => highlightLinks.has(link) ? 4 : 0)
+        .linkDirectionalParticleWidth(4)
+        .onNodeHover(node => {
+          elem.style.cursor = node && node.childLinks.length ? 'pointer' : null;
+
+          // no state change
+          if ((!node && !highlightNodes.size) || (node && hoverNode === node)) return;
+
+          highlightNodes.clear();
+          highlightLinks.clear();
+          if (node) {
+            highlightNodes.add(node);
+            node.neighbors.forEach(neighbor => highlightNodes.add(neighbor));
+            node.links.forEach(link => highlightLinks.add(link));
+          }
+
+          hoverNode = node || null;
+
+          updateHighlight();          
+        })
+        .onLinkHover(link => {
+          highlightNodes.clear();
+          highlightLinks.clear();
+
+          if (link) {
+            highlightLinks.add(link);
+            highlightNodes.add(link.source);
+            highlightNodes.add(link.target);
+          }
+
+          updateHighlight();
+        })
+        .nodeThreeObject(node => {
+          // use a sphere as a drag handle
+          const obj = new THREE.Mesh(
+            new THREE.SphereGeometry(10),
+            new THREE.MeshBasicMaterial({ depthWrite: false, transparent: true, opacity: 0 })
+          );
+
+          // add text sprite as child
+          const sprite = new SpriteText(`${node.name}`);
+          sprite.color = node.color;
+          sprite.textHeight = 8;
+          sprite.backgroundColor = "rgb(000011)";
+          sprite.padding = 1;
+          obj.add(sprite);
+
+          // add img sprite as child
+          // if (node.img) {
+          //   const imgTexture = new THREE.TextureLoader().load(`./imgs/${node.img}.jpg`);
+          //   const material = new THREE.SpriteMaterial({ map: imgTexture });
+          //   const imgSprite = new THREE.Sprite(material);
+          //   imgSprite.scale.set(sprite.scale.x, sprite.scale.x);
+          //   imgSprite.center.set(.5, .5);
+          //   imgSprite.name = "prova";
+          //   console.log(imgSprite)
+          //   obj.add(imgSprite);
+          // }
+
+          return obj;
+        })
+        .onNodeClick(node => {
+          if (node.childLinks.length) {
+            node.collapsed = !node.collapsed; // toggle collapse state
+            Graph.graphData(getPrunedTree());
+          }
+        })
+        .onNodeDragEnd(node => {
+          node.fx = node.x;
+          node.fy = node.y;
+          node.fz = node.z;
+        });
+        // .onNodeClick(node => {
+        //   // Aim at node from outside it
+        //   const distance = 100;
+        //   const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
+
+        //   Graph.cameraPosition(
+        //     { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }, // new position
+        //     node, // lookAt ({ x, y, z })
+        //     3000  // ms transition duration
+        //   );
+        // });
+
+
+    // Spread nodes a little wider
+    Graph.d3Force('charge').strength(-1000);
+
+    // fit to canvas when engine stops
+    // Graph
+    //   .cooldownTicks(100)
+    //   .onEngineStop(() => Graph.zoomToFit(400));
+
+    Graph.showNavInfo(false);
+
+    // fit to canvas when engine stops
+
+    // Bloom
+    // const bloomPass = new UnrealBloomPass();
+    // bloomPass.strength = 2;
+    // bloomPass.radius = 1;
+    // bloomPass.threshold = 0.1;
+    // Graph.postProcessingComposer().addPass(bloomPass);
+
+    function updateHighlight() {
+      // trigger update of highlighted objects in scene
+      Graph
+        .nodeColor(Graph.nodeColor())
+        .linkWidth(Graph.linkWidth())
+        .linkDirectionalParticles(Graph.linkDirectionalParticles());
+    }
+
+  </script>
+</body>
