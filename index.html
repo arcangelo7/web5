@@ -3,7 +3,7 @@
 
   <script src="//unpkg.com/three"></script>
   <script src="//unpkg.com/three-spritetext"></script>
-  <script src="//unpkg.com/3d-force-graph"></script>
+  <script src="//unpkg.com/3d-force-graph-vr"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
   <!--<script src="../../dist/3d-force-graph.js"></script>-->
 </head>
@@ -84,7 +84,7 @@
 
     collapseNodes();
 
-    const Graph = ForceGraph3D()(elem)
+    const Graph = ForceGraphVR()(elem)
         .graphData(getPrunedTree())
         .nodeLabel('cartiglio')
         .nodeAutoColorBy('group')
